@@ -1,9 +1,10 @@
 "use client";
 
 import { useRef, useState, useEffect } from "react";
-import { useSubtitles } from "@/hooks/useSubtitles";
+import { useSubtitles, Subtitle } from "@/hooks/useSubtitles";
 import { generateSRT } from "@/lib/generateSRT";
 import { parseSRT } from "@/lib/parseSRT";
+import { transliterate } from "@/lib/transliterate";
 import { useToast } from "@/hooks/useToast";
 import { useProjectStorage } from "@/hooks/useProjectStorage";
 
@@ -16,6 +17,7 @@ export default function VideoPlayer() {
     const [selectedId, setSelectedId] = useState<number | null>(null);
     const [flash, setFlash] = useState<string | null>(null);
     const [activeSubtitleId, setActiveSubtitleId] = useState<number | null>(null);
+    const [tamilMode, setTamilMode] = useState(false);
 
     const flashTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const prevSubtitlesLength = useRef(0);
@@ -413,7 +415,16 @@ export default function VideoPlayer() {
             {/* RIGHT PANEL: Subtitles */}
             <div className="w-[480px] flex flex-col bg-gray-950 relative z-0">
                 <div className="p-4 border-b border-gray-800 bg-gray-900/80 flex items-center justify-between">
-                    <h2 className="font-semibold text-gray-200 tracking-wide">Subtitles</h2>
+                    <h2 className="font-semibold text-gray-200 tracking-wide flex items-center gap-3">
+                        Subtitles
+                        <button 
+                            onClick={() => setTamilMode(!tamilMode)}
+                            className={`text-xs px-2 py-1 rounded transition-colors border ${tamilMode ? 'bg-blue-900/50 text-blue-300 border-blue-500/50 shadow-[0_0_10px_rgba(59,130,246,0.2)]' : 'bg-gray-800 text-gray-400 border-gray-700 hover:bg-gray-700'}`}
+                            title="Toggle Phonetic Tamil Typing (A → அ)"
+                        >
+                            A → அ
+                        </button>
+                    </h2>
                     <span className="text-xs text-gray-500 font-mono">{subtitles.length} items</span>
                 </div>
 
@@ -496,21 +507,42 @@ export default function VideoPlayer() {
                                         value={s.text}
                                         onChange={(e) => updateSubtitleText(s.id, e.target.value)}
                                         onClick={(e) => e.stopPropagation()}
-                                        onKeyDown={(e) => {
-                                            if (e.key === "Escape") {
+                                        onKeyDown={async (e) => {
+                                            if (e.key === "Escape" || (!e.shiftKey && e.key === "Enter")) {
                                                 e.preventDefault();
                                                 e.currentTarget.blur();
+                                                if (e.key === "Enter") handleEnterNext();
                                                 return;
                                             }
 
-                                            if (e.key === "Enter") {
-                                                e.preventDefault();
-                                                e.currentTarget.blur();
-                                                handleEnterNext();
-                                                return;
-                                            }
+                                            // Transliteration logic
+                                            if (e.key === " " && tamilMode) {
+                                                const cursorPosition = e.currentTarget.selectionStart;
+                                                const textBeforeCursor = s.text.slice(0, cursorPosition);
+                                                const textAfterCursor = s.text.slice(cursorPosition);
+                                                
+                                                const words = textBeforeCursor.split(/\s+/);
+                                                const lastWord = words[words.length - 1];
 
-                                            e.stopPropagation();
+                                                if (lastWord && /^[a-zA-Z]+$/.test(lastWord)) {
+                                                    e.preventDefault(); // Pause the space insertion
+                                                    const tWord = await transliterate(lastWord);
+                                                    
+                                                    const newTextBefore = textBeforeCursor.slice(0, -lastWord.length) + tWord + " ";
+                                                    const newText = newTextBefore + textAfterCursor;
+                                                    
+                                                    updateSubtitleText(s.id, newText);
+                                                    
+                                                    const newCursorPos = newTextBefore.length;
+                                                    setTimeout(() => {
+                                                        const el = document.activeElement as HTMLTextAreaElement;
+                                                        if (el) {
+                                                            el.selectionStart = newCursorPos;
+                                                            el.selectionEnd = newCursorPos;
+                                                        }
+                                                    }, 10);
+                                                }
+                                            }
                                         }}
                                         placeholder="Type subtitle here..."
                                         className="w-full bg-black/40 border border-gray-800 rounded px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-blue-500/60 focus:ring-2 focus:ring-blue-500/20 focus:shadow-[0_0_12px_rgba(59,130,246,0.15)] transition-all duration-300 ease-out resize-none overflow-hidden placeholder-gray-700"
